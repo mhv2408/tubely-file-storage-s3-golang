@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,7 +36,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	const maxMemory = 10 << 20 // 10MB memory
 	r.ParseMultipartForm(maxMemory)
 
-	file, _, err := r.FormFile("thumbnail")
+	file, header, err := r.FormFile("thumbnail")
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
 		return
@@ -56,16 +57,12 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusUnauthorized, "You are not authorized to update this video", err)
 		return
 	}
-	videoThumbnails[db_video.ID] = thumbnail{
-		data:      image_data,
-		mediaType: r.FormValue("Content-type"),
-	}
-	thumbnail_url := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID)
+	base64_data := base64.StdEncoding.EncodeToString(image_data)
 
+	thumbnail_url := fmt.Sprintf("data:%s;base64,%s", header.Header.Get("Content-Type"), base64_data)
 	db_video.ThumbnailURL = &thumbnail_url
 	err = cfg.db.UpdateVideo(db_video)
 	if err != nil {
-		delete(videoThumbnails, videoID)
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
 		return
 	}
