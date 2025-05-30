@@ -51,7 +51,8 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusBadRequest, "Format Not Supported: Thumbnail should by either jpg or png", nil)
 		return
 	}
-	assetPath := getAssetPath(videoID, mediaType)
+
+	assetPath := getAssetPath(mediaType)
 	assetDiskPath := cfg.getAssetDiskPath(assetPath)
 
 	dst, err := os.Create(assetDiskPath)
@@ -78,6 +79,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	url := cfg.getAssetURL(assetPath)
 	db_video.ThumbnailURL = &url
 	err = cfg.db.UpdateVideo(db_video)
+	fmt.Println(*db_video.ThumbnailURL)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
 		return
