@@ -80,7 +80,7 @@ func main() {
 		log.Fatal("PORT environment variable is not set")
 	}
 
-	s3Config, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(os.Getenv("S3_REGION")))
+	s3Config, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(s3Region))
 	if err != nil {
 		log.Fatal("Cannot create a s3 config: ", err)
 	}
