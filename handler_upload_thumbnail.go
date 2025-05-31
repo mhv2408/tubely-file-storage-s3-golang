@@ -79,7 +79,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	url := cfg.getAssetURL(assetPath)
 	db_video.ThumbnailURL = &url
 	err = cfg.db.UpdateVideo(db_video)
-	fmt.Println(*db_video.ThumbnailURL)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
 		return
