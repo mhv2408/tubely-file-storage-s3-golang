@@ -1,17 +1,48 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
 )
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	err := cmd.Run()
+	if err != nil {
+		fmt.Println(err)
+		return "Unable to execute the command", err
+	}
+
+	type streamDetails struct {
+		Streams []struct {
+			DisplayAspectRatio string `json:"display_aspect_ratio,omitempty"`
+		} `json:"streams"`
+	}
+	params := streamDetails{}
+	err = json.Unmarshal(buf.Bytes(), &params)
+	if err != nil {
+		return "", err
+	}
+	video_aspect_ratio := params.Streams[0].DisplayAspectRatio
+	if video_aspect_ratio == "16:9" || video_aspect_ratio == "9:16" {
+		return video_aspect_ratio, nil
+	}
+	return "other", nil
+
+}
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
 	const uploadLimit = 1 << 30 //1GB (setting an upload limit of 1GB)
@@ -41,7 +72,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "could not extract video by ID", err)
 		return
 	}
-	// 3.1 Checking if the video Owneer in the DB is the same as the User obtained from JWT
+	// 3.1 Checking if the video Owner in the DB is the same as the User obtained from JWT
 	if video.UserID != userID {
 		respondWithError(w, http.StatusUnauthorized, "You are not the owner of this video", err)
 		return
@@ -55,7 +86,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	defer file.Close()
 	// 5. Getting the Media Type of the Resource and Validating it for mp4 type.
 	mediaType, _, err := mime.ParseMediaType(handler.Header.Get("Content-Type"))
-	assetPath := getAssetPath(mediaType)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "could not parse the media type", err)
 		return
@@ -86,12 +116,29 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 7. Generate a s3 URL and put the <os_file> into S3 bucket
+	//6.1 Get the Video prefix("potrait", "landscape", "other")
+	video_prefix := ""
+	aspectRatio, err := getVideoAspectRatio(os_file.Name())
 
-	url := cfg.getAssetURL(assetPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error determining aspect ratio", err)
+		return
+	}
+	switch aspectRatio {
+	case "16:9":
+		video_prefix = "landscape"
+	case "9:16":
+		video_prefix = "portrait"
+	default:
+		video_prefix = "other"
+	}
+
+	// 7. put the <os_file> into S3 bucket..add the prefix to the path
+
+	key := video_prefix + "/" + getAssetPath(mediaType)
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
-		Key:         aws.String(url),
+		Key:         aws.String(key),
 		Body:        os_file,
 		ContentType: aws.String(mediaType),
 	})
@@ -100,11 +147,11 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Error uploading file to S3", err)
 		return
 	}
+	//https://<bucket-name>.s3.<region>.amazonaws.com/<key>
 
-	s3VideoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, url)
-
+	objectURL := cfg.getObjectURL(key)
 	// 8. Update the URL to s3 bucket location and update all details in DB.
-	video.VideoURL = &s3VideoURL
+	video.VideoURL = &objectURL
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
